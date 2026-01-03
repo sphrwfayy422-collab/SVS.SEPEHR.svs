@@ -338,6 +338,9 @@
     </div>
 
     <script>
+        // آدرس ثابت سرور ترموکس شما
+        const API_BASE = "https://e70ef42cc98376ae-152-233-35-131.serveousercontent.com";
+
         window.app = {
             state: {
                 lang: 'fa',
@@ -388,19 +391,20 @@
                     this.updateAuthButton();
                 }
 
-                // لیست محصولات پیش‌فرض (برای وقتی که سرور خاموشه)
+                // لیست محصولات پیش‌فرض (آفلاین)
                 const fallbackProducts = [
                     { id: 1, name: "SVS Drone X1 (Offline)", price: 135000000, cat: "drone", img: "https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800", rating: 5, badge: "جدید", desc: "پهپاد اختصاصی امپراتوری SVS..." },
                     { id: 2, name: "Lego Bugatti (Offline)", price: 19000000, cat: "lego", img: "https://images.unsplash.com/photo-1587654780291-39c940483719?w=800", rating: 4.8, badge: "پرفروش", desc: "۳۵۹۹ قطعه مهندسی دقیق..." }
                 ];
 
-                // *********** اتصال به سرور پایتون ***********
-                fetch('/api/products/')
+                // *********** اتصال به سرور (با لینک Serveo) ***********
+                fetch(`${API_BASE}/api/products/`)
                 .then(response => {
                     if (!response.ok) throw new Error("مشکل در اتصال به سرور");
                     return response.json();
                 })
                 .then(data => {
+                    console.log("🔥 محصولات دریافت شد:", data);
                     if(data.length > 0) {
                         this.state.products = data;
                     } else {
@@ -409,17 +413,16 @@
                     this.finishLoading();
                 })
                 .catch(error => {
-                    console.error("❌ سرور خاموش است یا خطا دارد. استفاده از حالت آفلاین.", error);
+                    console.error("❌ اتصال ناموفق. استفاده از حالت آفلاین.", error);
                     this.state.products = fallbackProducts;
                     this.finishLoading();
                 });
 
-                // تنظیمات تم و زبان
+                // لود تنظیمات
                 if(localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');
                 const savedLang = localStorage.getItem('lang');
                 if (savedLang) this.setLanguage(savedLang, false);
 
-                // لود کردن بقیه چیزها از حافظه
                 const savedCart = localStorage.getItem('cart');
                 if(savedCart) this.state.cart = JSON.parse(savedCart);
                 
@@ -436,7 +439,6 @@
                 setTimeout(() => {
                     document.getElementById('loader').classList.add('hidden');
                     document.getElementById('main-footer').classList.remove('hidden');
-                    
                     if (this.state.user) {
                         if (this.state.user.role === 'admin') this.router('admin');
                         else this.router('home');
@@ -720,6 +722,7 @@
             
             deleteProduct(id) {
                 if(confirm(this.t('delete_confirm'))) {
+                    fetch(`${API_BASE}/api/products/${id}`, { method: 'DELETE' }) // این بخش نیاز به بک اند دارد اما فعلا در فرانت حذف می کنیم
                     this.state.products = this.state.products.filter(p => p.id !== id);
                     this.state.cart = this.state.cart.filter(c => c.id !== id);
                     this.state.wishlist = this.state.wishlist.filter(w => w !== id);
@@ -781,31 +784,35 @@
                 const img = document.getElementById('prod-img').value;
                 const desc = document.getElementById('prod-desc').value;
 
-                if (id) {
-                    const index = this.state.products.findIndex(p => p.id == id);
-                    if (index > -1) {
-                        this.state.products[index] = { 
-                            ...this.state.products[index], 
-                            name, price, cat, img, desc 
-                        };
+                // ساخت آبجکت محصول
+                const productData = {
+                    id: id ? parseInt(id) : Math.max(...this.state.products.map(p => p.id), 0) + 1,
+                    name, price, cat, img, desc,
+                    rating: 5, badge: id ? "" : "جدید"
+                };
+
+                // ارسال به سرور
+                fetch(`${API_BASE}/api/products/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (id) {
+                        const index = this.state.products.findIndex(p => p.id == id);
+                        if (index > -1) this.state.products[index] = productData;
+                    } else {
+                        this.state.products.push(productData);
                     }
-                } else {
-                    const newId = Math.max(...this.state.products.map(p => p.id), 0) + 1;
-                    this.state.products.push({
-                        id: newId,
-                        name,
-                        price,
-                        cat,
-                        img,
-                        desc,
-                        rating: 5, 
-                        badge: "جدید"
-                    });
-                }
-                this.saveProducts();
-                this.closeProductModal();
-                this.renderAdmin(document.getElementById('main-content'));
-                this.toast(this.t('saved'), 'success');
+                    this.saveProducts();
+                    this.closeProductModal();
+                    this.renderAdmin(document.getElementById('main-content'));
+                    this.toast(this.t('saved'), 'success');
+                })
+                .catch(err => {
+                    this.toast('خطا در ذخیره (سرور وصل است؟)', 'error');
+                });
             },
 
             addToCart(id) { const item = this.state.cart.find(x=>x.id===id); if(item) item.qty++; else this.state.cart.push({...this.state.products.find(x=>x.id===id),qty:1}); this.updateBadge(); this.saveCart(); this.toast('Added to cart','success'); },
@@ -823,19 +830,15 @@
             toggleAuthModal() { const m=document.getElementById('auth-modal'); m.classList.toggle('hidden'); this.setAuthTab('login'); },
             setAuthTab(mode) { this.state.authMode=mode; document.getElementById('field-name').classList.toggle('hidden', mode==='login'); document.getElementById('auth-title').innerText = mode==='login'?this.t('login'):'Create Account'; document.getElementById('btn-submit-auth').innerText = mode==='login'?'Login':'Sign Up'; document.getElementById('tab-login').className = mode==='login' ? "flex-1 py-2 rounded-lg text-sm font-bold bg-white dark:bg-white/10 shadow text-brand-600" : "flex-1 py-2 rounded-lg text-sm font-bold text-gray-500"; document.getElementById('tab-signup').className = mode==='signup' ? "flex-1 py-2 rounded-lg text-sm font-bold bg-white dark:bg-white/10 shadow text-brand-600" : "flex-1 py-2 rounded-lg text-sm font-bold text-gray-500"; },
             
-            // --- تابع ثبت‌نام و ورود که آپدیت شده است ---
             handleAuthSubmit(e) { 
                 e.preventDefault(); 
                 const nameIn = document.getElementById('input-name').value; 
                 const emailIn = document.getElementById('input-email').value; 
                 const passIn = document.getElementById('input-pass').value;
 
-                // --- اگر دکمه ثبت‌نام زده شده بود ---
                 if(this.state.authMode === 'signup') {
                      if(!nameIn) { this.toast('لطفا نام را وارد کنید','error'); return; }
-                     
-                     // ارسال درخواست ثبت‌نام به پایتون
-                     fetch('/api/signup', {
+                     fetch(`${API_BASE}/api/signup`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: nameIn, email: emailIn, password: passIn })
@@ -845,20 +848,17 @@
                          if(data.status === 'error') {
                              this.toast(data.message, 'error');
                          } else {
-                             // ثبت نام موفق -> لاگین خودکار
                              this.state.user = { name: data.name, email: emailIn, role: data.role };
                              this.saveUserAndRedirect(data.message);
                          }
                      })
                      .catch(err => {
-                         console.error(err);
-                         this.toast('خطا در اتصال به سرور (مطمئن شوید uvicorn روشن است)', 'error');
+                         this.toast('خطا در اتصال به سرور', 'error');
                      });
                      return;
                 }
                 
-                // --- اگر دکمه ورود زده شده بود ---
-                fetch('/api/login', {
+                fetch(`${API_BASE}/api/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: emailIn, password: passIn })
@@ -873,7 +873,6 @@
                     }
                 })
                 .catch(error => {
-                    console.error("Login Error:", error);
                     this.state.user = { name: "Guest (Offline)", email: emailIn, role: 'user' };
                     this.saveUserAndRedirect("شما آفلاین وارد شدید (سرور قطع است)");
                 });
@@ -884,12 +883,8 @@
                 document.getElementById('auth-modal').classList.add('hidden'); 
                 this.updateAuthButton(); 
                 this.toast(msg, 'success');
-                
-                if (this.state.user.role === 'admin') {
-                    this.router('admin');
-                } else {
-                    this.router('home');
-                }
+                if (this.state.user.role === 'admin') this.router('admin');
+                else this.router('home');
             },
 
             initCheckout() {
@@ -903,18 +898,14 @@
                 document.getElementById('checkout-modal').classList.remove('hidden');
             },
             
-            closeCheckoutModal() {
-                document.getElementById('checkout-modal').classList.add('hidden');
-            },
+            closeCheckoutModal() { document.getElementById('checkout-modal').classList.add('hidden'); },
 
             handleCheckoutSubmit(e) {
                 e.preventDefault();
                 const btn = e.target.querySelector('button[type="submit"]');
                 const originalText = btn.innerHTML;
-                
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> ...';
-                
                 setTimeout(() => {
                     const newOrder = {
                         id: Math.floor(100000 + Math.random() * 900000),
@@ -923,7 +914,6 @@
                         total: this.state.cart.reduce((s, i) => s + (i.price * i.qty), 0),
                         status: 'processing'
                     };
-
                     this.state.orders.push(newOrder);
                     localStorage.setItem('orders', JSON.stringify(this.state.orders));
                     this.state.cart = [];
@@ -937,12 +927,7 @@
                 }, 2000);
             },
 
-            logout() { 
-                this.state.user=null; 
-                localStorage.removeItem('user'); 
-                location.reload(); 
-            },
-            
+            logout() { this.state.user=null; localStorage.removeItem('user'); location.reload(); },
             updateAuthButton() { const btn=document.getElementById('desktop-auth-btn'); if(this.state.user) btn.innerHTML=`<button onclick="app.router('profile')" class="hidden md:flex bg-gray-100 dark:bg-white/10 hover:bg-gray-200 text-gray-800 dark:text-white px-4 py-2.5 rounded-xl font-bold text-sm transition items-center gap-2"><i class="fas fa-user-circle text-lg"></i><span>${this.state.user.name}</span></button>`; else btn.innerHTML=`<button onclick="app.toggleAuthModal()" class="hidden md:flex bg-brand-600 hover:bg-brand-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-500/20 transition-all hover:shadow-brand-500/40 items-center gap-2"><span>${this.t('login')}</span><i class="fas fa-arrow-left text-xs rtl:rotate-0 ltr:rotate-180"></i></button>`; },
             saveCart() { localStorage.setItem('cart', JSON.stringify(this.state.cart)); },
             saveProducts() { localStorage.setItem('products', JSON.stringify(this.state.products)); },
