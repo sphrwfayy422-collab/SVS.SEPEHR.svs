@@ -338,8 +338,8 @@
     </div>
 
     <script>
-        // آدرس ثابت سرور ترموکس شما
-        const API_BASE = "https://e70ef42cc98376ae-152-233-35-131.serveousercontent.com";
+        // آدرس ثابت سرور ترموکس شما - اینجا دقیقاً لینک جدیدت رو گذاشتم
+        const API_BASE = "https://dbce79464f58092b-152-233-35-131.serveousercontent.com";
 
         window.app = {
             state: {
